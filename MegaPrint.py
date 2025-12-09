@@ -1,80 +1,101 @@
-from flask import Flask, request, jsonify
+import requests
+import time
 import win32print
-import json
+import sys
 
-app = Flask(__name__)
+# ================= CONFIGURAÇÕES =================
+# Coloque aqui o link que o Render (ou PythonAnywhere) te deu.
+# NÃO coloque a barra "/" no final.
+URL_SERVIDOR = "https://api-impressora.onrender.com" 
 
-# --- FUNÇÃO DE IMPRESSÃO (Sua parte original) ---
-def imprimir_cupom(texto_para_imprimir):
-    nome_impressora = "ESCRITORIO" 
-    
+# Nome exato da impressora no Windows
+NOME_IMPRESSORA = "ESCRITORIO"
+# =================================================
+
+def imprimir_cupom(conteudo):
+    """
+    Função responsável por enviar os bytes brutos para a impressora
+    """
     try:
-        hPrinter = win32print.OpenPrinter(nome_impressora)
+        hPrinter = win32print.OpenPrinter(NOME_IMPRESSORA)
         try:
             hJob = win32print.StartDocPrinter(hPrinter, 1, ("Cupom Bot", None, "RAW"))
             win32print.StartPagePrinter(hPrinter)
             
-            # --- COMANDOS DE FORMATAÇÃO (ESC/POS) ---
-            CMD_CENTRALIZAR = b'\x1b\x61\x01'
-            CMD_ESQUERDA    = b'\x1b\x61\x00'
-            CMD_NEGRITO_ON  = b'\x1b\x45\x01'
-            CMD_NEGRITO_OFF = b'\x1b\x45\x00'
-            CMD_CORTE       = b'\x1d\x56\x00'
+            # --- Comandos ESC/POS (Linguagem da Impressora) ---
+            CMD_INIT        = b'\x1b\x40'       # Iniciar
+            CMD_CENTRALIZAR = b'\x1b\x61\x01'   # Centralizar
+            CMD_ESQUERDA    = b'\x1b\x61\x00'   # Alinhar Esquerda
+            CMD_NEGRITO_ON  = b'\x1b\x45\x01'   # Negrito Ligar
+            CMD_NEGRITO_OFF = b'\x1b\x45\x00'   # Negrito Desligar
+            CMD_CORTE       = b'\x1d\x56\x00'   # Cortar Papel
             
-            # --- CONSTRUINDO O CUPOM ---
+            # --- Montagem do Cupom ---
+            win32print.WritePrinter(hPrinter, CMD_INIT)
             
-            # 1. Cabeçalho Centralizado e em Negrito
+            # Cabeçalho
             win32print.WritePrinter(hPrinter, CMD_CENTRALIZAR + CMD_NEGRITO_ON)
-            win32print.WritePrinter(hPrinter, "--- PEDIDO NOVO ---\n\n".encode("cp850"))
-            win32print.WritePrinter(hPrinter, CMD_NEGRITO_OFF + CMD_ESQUERDA) # Volta ao normal
+            win32print.WritePrinter(hPrinter, "=== NOVO PEDIDO ===\n\n".encode("cp850"))
+            win32print.WritePrinter(hPrinter, CMD_NEGRITO_OFF + CMD_ESQUERDA)
             
-            # 2. O Texto do Pedido (Garante que é string)
-            texto_str = str(texto_para_imprimir)
+            # Corpo do Texto
+            # Tratamento para garantir que quebras de linha funcionem
+            texto_formatado = str(conteudo).replace("\\n", "\n")
+            win32print.WritePrinter(hPrinter, texto_formatado.encode("cp850", errors="ignore"))
             
-            # DICA: Substitui quebras de linha do JSON (\n) por quebras reais
-            texto_final = texto_str.replace("\\n", "\n")
+            # Rodapé (Espaço para sair da máquina)
+            win32print.WritePrinter(hPrinter, b"\n\n-------------------\n")
+            win32print.WritePrinter(hPrinter, CMD_CENTRALIZAR)
+            win32print.WritePrinter(hPrinter, b"BotConversa Imprime\n\n\n\n\n")
             
-            win32print.WritePrinter(hPrinter, texto_final.encode("cp850", errors="ignore"))
-            
-            # 3. Rodapé com espaço extra para sair da máquina
-            win32print.WritePrinter(hPrinter, b"\n\n\n-------------------\n")
-            win32print.WritePrinter(hPrinter, b"    Fim do Pedido    \n\n\n\n\n") 
-            
-            # 4. Cortar
+            # Cortar
             win32print.WritePrinter(hPrinter, CMD_CORTE)
             
             win32print.EndPagePrinter(hPrinter)
             win32print.EndDocPrinter(hPrinter)
-            print(" >> CUPOM IMPRESSO COM SUCESSO")
+            print(f" >> [SUCESSO] Impressão realizada!")
             
         finally:
             win32print.ClosePrinter(hPrinter)
     except Exception as e:
-        print(f"ERRO: {e}")
-# --- SERVIDOR WEBHOOK (A parte que faltava) ---
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    print("Recebi um chamado!")
-    
-    # Pega os dados brutos
-    dados = request.json
-    
-    # --- A MÁGICA ACONTECE AQUI ---
-    # Se o JSON for { "cupom": "Pedido de Pizza" }, ele pega só "Pedido de Pizza"
-    # Se não achar 'cupom', tenta achar 'message', ou usa um padrão.
-    texto_limpo = dados.get('cupom') or dados.get('message') or "Sem texto no pedido"
-    
-    # Se o texto for uma lista de itens (ex: arrays), transforma em string bonita
-    if isinstance(texto_limpo, list):
-        texto_limpo = "\n".join(str(x) for x in texto_limpo)
-    
-    # Manda imprimir só o recheio, sem a casca do JSON
-    imprimir_cupom(texto_limpo)
-    
-    return jsonify({"status": "sucesso"})
+        print(f" >> [ERRO IMPRESSORA] Verifique se ela está ligada ou se o nome está certo.\nErro: {e}")
 
-# --- INICIAR O PROGRAMA ---
-if __name__ == '__main__':
-    # Isso mantém o programa rodando infinitamente esperando mensagens
-    print("O Robô de Impressão está ONLINE e aguardando pedidos...")
-    app.run(port=5000)
+def iniciar_monitoramento():
+    print("="*50)
+    print(f" ROBÔ DE IMPRESSÃO INICIADO")
+    print(f" Conectando em: {URL_SERVIDOR}")
+    print(f" Impressora alvo: {NOME_IMPRESSORA}")
+    print("="*50)
+    print("Aguardando pedidos... (pressione Ctrl+C para parar)")
+
+    endpoint = f"{URL_SERVIDOR}/buscar_pedido"
+
+    while True:
+        try:
+            # Faz a requisição para a nuvem
+            response = requests.get(endpoint, timeout=10)
+            
+            if response.status_code == 200:
+                dados = response.json()
+                
+                # Verifica se veio um pedido de verdade (não vazio)
+                # O servidor manda {} se não tiver nada
+                if dados and "texto" in dados:
+                    print(f"\n[NOVO PEDIDO RECEBIDO] Processando...")
+                    imprimir_cupom(dados["texto"])
+                else:
+                    # Não tem pedido, apenas ignora
+                    pass
+            else:
+                print(f"[ALERTA] Servidor respondeu com código {response.status_code}")
+
+        except requests.exceptions.ConnectionError:
+            print("[ERRO REDE] Sem internet ou servidor fora do ar. Tentando em 5s...", end="\r")
+        except Exception as e:
+            print(f"[ERRO DESCONHECIDO] {e}")
+
+        # Espera 5 segundos antes de perguntar de novo
+        time.sleep(5)
+
+if __name__ == "__main__":
+    iniciar_monitoramento()
