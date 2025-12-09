@@ -82,7 +82,7 @@ def iniciar_monitoramento():
                 # O servidor manda {} se não tiver nada
                 if dados and "texto" in dados:
                     print(f"\n[NOVO PEDIDO RECEBIDO] Processando...")
-                    imprimir_cupom(dados["texto"])
+                    imprimir_cupom(["texto"])
                 else:
                     # Não tem pedido, apenas ignora
                     pass
@@ -95,7 +95,8 @@ def iniciar_monitoramento():
             print(f"[ERRO DESCONHECIDO] {e}")
 
         # Espera 5 segundos antes de perguntar de novo
-        time.sleep(5)
+        time.sleep(1)
 
 if __name__ == "__main__":
     iniciar_monitoramento()
+
